@@ -1,5 +1,5 @@
 name: Struct notify deploy
-description: Tell Struct that a commit reached an environment, so it can audit the deploy and set up monitors.
+description: Tell Struct that you deployed to an environment, so it can evaluate the deploy and set up monitors.
 author: Struct
 branding:
   icon: upload-cloud
