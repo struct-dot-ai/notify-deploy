@@ -1,0 +1,116 @@
+name: test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/run.sh
+
+  # Per-service workflow calling a shared deploy workflow; two services share a
+  # commit, so they must be recorded as two deploys.
+  service-a:
+    uses: ./.github/workflows/_reusable-deploy.yml
+    with: { project: service-a }
+  service-b:
+    uses: ./.github/workflows/_reusable-deploy.yml
+    with: { project: service-b }
+
+  # The step lives inside the customer's own composite action.
+  nested-composite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/start_mock.sh
+      - uses: ./tests/wrapper
+        with: { service: checkout, target: prod, commit: abcdef1234567, api-url: '${{ env.STRUCT_TEST_URL }}' }
+      - uses: ./tests/wrapper
+        with: { service: checkout, target: staging, commit: abcdef1234567, api-url: '${{ env.STRUCT_TEST_URL }}' }
+      - uses: ./tests/wrapper
+        with: { service: billing, target: preview, commit: abcdef1234567, api-url: '${{ env.STRUCT_TEST_URL }}' }
+      - name: only the production rollout reported
+        run: |
+          test "$(wc -l < "$REQUESTS_FILE" | tr -d ' ')" = 1
+          python3 tests/assert_request.py 0 sha=abcdef1234567 environment=production idempotencyKey=checkout-abcdef1234567
+
+  # Deploy whose commit is passed in rather than taken from github.sha.
+  dispatch-override:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/start_mock.sh
+      - id: notify
+        uses: ./
+        with:
+          api-key: sk-good
+          environment: production
+          sha: '1111111222222233333334444444555555566666'
+          previous-sha: '9999999'
+          repository: acme/platform
+          api-url: ${{ env.STRUCT_TEST_URL }}
+      - run: python3 tests/assert_request.py -1 sha=1111111222222233333334444444555555566666 previousSha=9999999 repository=acme/platform
+
+  # Report the job's outcome with if: always().
+  job-status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/start_mock.sh
+      - run: echo deploying
+      - if: always()
+        uses: ./
+        with:
+          api-key: sk-good
+          environment: production
+          status: ${{ job.status }}
+          api-url: ${{ env.STRUCT_TEST_URL }}
+      - run: python3 tests/assert_request.py -1 status=success
+
+  # Self-hosted style runner container: bash and curl, no jq, no node on PATH.
+  minimal-container:
+    runs-on: ubuntu-latest
+    container: debian:bookworm-slim
+    steps:
+      - run: apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates python3 > /dev/null
+      - uses: actions/checkout@v4
+      - run: "! command -v jq"
+      - run: bash tests/start_mock.sh
+      - id: notify
+        uses: ./
+        with:
+          api-key: sk-good
+          environment: production
+          api-url: ${{ env.STRUCT_TEST_URL }}
+      - run: |
+          test "${{ steps.notify.outputs.result }}" = recorded
+          python3 tests/assert_request.py -1 environment=production
+
+  # Struct unreachable or key wrong: the deploy job must stay green.
+  never-breaks-deploys:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: down
+        uses: ./
+        with:
+          api-key: sk-good
+          environment: production
+          api-url: http://127.0.0.1:9
+      - run: test "${{ steps.down.outputs.result }}" = failed
+
+  # The action only uses bash builtins, curl and coreutils.
+  no-extra-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: "! grep -vE '^[[:space:]]*#' notify.sh | grep -nE '\\b(jq|python3?|node|npx)\\b'"

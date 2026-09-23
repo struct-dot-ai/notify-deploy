@@ -1,0 +1,25 @@
+# A shared deploy workflow called by per-service workflows (workflow_call),
+# the common layout for repositories with many services.
+name: reusable deploy
+on:
+  workflow_call:
+    inputs:
+      project: { type: string, required: true }
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/start_mock.sh
+      - id: notify
+        uses: ./
+        with:
+          api-key: sk-good
+          environment: production
+          api-url: ${{ env.STRUCT_TEST_URL }}
+      - name: github.sha and repository come from the caller's run
+        run: |
+          test "${{ steps.notify.outputs.result }}" = recorded
+          test -n "${{ steps.notify.outputs.deployment-id }}"
+          python3 tests/assert_request.py -1 sha=${{ github.sha }} repository=${{ github.repository }} environment=production status=success \
+            idempotencyKey="${{ github.repository }}:production:${{ github.sha }}:${{ github.run_id }}:${{ github.run_attempt }}:deploy-production"

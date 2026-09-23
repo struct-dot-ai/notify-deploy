@@ -1,0 +1,23 @@
+# A shared composite deploy action that reports to Struct from inside
+# itself, only for production services.
+name: wrapper
+inputs:
+  service: { required: true }
+  target: { required: true }
+  commit: { required: true }
+  api-url: { required: true }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "pretend we rolled out ${{ inputs.service }} to ${{ inputs.target }}"
+    - name: Notify Struct of production deploy
+      if: success() && inputs.target == 'prod' 
+      continue-on-error: true
+      uses: ./
+      with:
+        api-key: sk-good
+        environment: production
+        sha: ${{ inputs.commit }}
+        idempotency-key: ${{ inputs.service }}-${{ inputs.commit }}
+        api-url: ${{ inputs.api-url }}

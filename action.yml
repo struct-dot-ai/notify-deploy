@@ -1,0 +1,68 @@
+name: Struct notify deploy
+description: Tell Struct that a commit reached an environment, so it can audit the deploy and set up monitors.
+author: Struct
+branding:
+  icon: upload-cloud
+  color: purple
+
+inputs:
+  api-key:
+    description: Struct deployment key (sk-...). Create one in Struct under Settings > Deployment Keys. Pass it from a secret.
+    required: true
+  environment:
+    description: Environment the commit reached, for example production. Must match the environment configured in Struct exactly, including case.
+    required: true
+  sha:
+    description: Commit that was deployed. Defaults to github.sha. Set it when the workflow is not triggered by the deployed commit (repository_dispatch, workflow_run, schedule).
+    required: false
+    default: ''
+  repository:
+    description: GitHub repository as owner/name. Defaults to the repository running the workflow.
+    required: false
+    default: ''
+  status:
+    description: success, failure or error. job.status values are accepted too; cancelled reports nothing.
+    required: false
+    default: success
+  previous-sha:
+    description: Commit this deploy replaced. Optional; Struct uses its last recorded deploy for the environment when omitted.
+    required: false
+    default: ''
+  idempotency-key:
+    description: Unique id for this deploy. Retrying with the same key never records a second deploy. Defaults to a key built from the repository, environment, commit, run, attempt and job.
+    required: false
+    default: ''
+  api-url:
+    description: Struct API base URL.
+    required: false
+    default: https://api.struct.ai
+  fail-on-error:
+    description: When false (default), a problem reporting to Struct is logged as an error annotation but never fails your deploy job.
+    required: false
+    default: 'false'
+
+outputs:
+  result:
+    description: recorded, skipped or failed.
+    value: ${{ steps.notify.outputs.result }}
+  deployment-id:
+    description: Id of the deployment Struct recorded, when result is recorded.
+    value: ${{ steps.notify.outputs.deployment-id }}
+
+runs:
+  using: composite
+  steps:
+    - id: notify
+      shell: bash
+      env:
+        STRUCT_API_KEY: ${{ inputs.api-key }}
+        STRUCT_ENVIRONMENT: ${{ inputs.environment }}
+        STRUCT_SHA: ${{ inputs.sha }}
+        STRUCT_DEFAULT_SHA: ${{ github.sha }}
+        STRUCT_REPOSITORY: ${{ inputs.repository }}
+        STRUCT_STATUS: ${{ inputs.status }}
+        STRUCT_PREVIOUS_SHA: ${{ inputs.previous-sha }}
+        STRUCT_IDEMPOTENCY_KEY: ${{ inputs.idempotency-key }}
+        STRUCT_API_URL: ${{ inputs.api-url }}
+        STRUCT_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: bash "$GITHUB_ACTION_PATH/notify.sh"

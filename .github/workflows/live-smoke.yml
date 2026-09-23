@@ -1,0 +1,101 @@
+# Posts real deploys to a Struct API. Run by hand after changing the action.
+#
+# Needs repository secret STRUCT_DEPLOY_KEY: a deployment key for a Struct
+# organization whose GitHub App installation can see `repository`.
+# Use an environment name that no monitor or Auto Monitors setting uses
+# (the default does), so the smoke test records deploys without starting
+# analysis.
+name: live smoke
+on:
+  workflow_dispatch:
+    inputs:
+      api-url:
+        description: Struct API base URL
+        default: https://api.struct.ai
+      repository:
+        description: owner/name visible to the key's Struct organization
+        required: true
+      sha:
+        description: A commit in that repository
+        required: true
+      environment:
+        description: Environment name to report
+        default: notify-deploy-smoke
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: first
+        uses: ./
+        with:
+          api-key: ${{ secrets.STRUCT_DEPLOY_KEY }}
+          api-url: ${{ inputs.api-url }}
+          repository: ${{ inputs.repository }}
+          sha: ${{ inputs.sha }}
+          environment: ${{ inputs.environment }}
+          idempotency-key: smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-error: 'true'
+
+      - id: retry
+        name: same idempotency key returns the same deployment
+        uses: ./
+        with:
+          api-key: ${{ secrets.STRUCT_DEPLOY_KEY }}
+          api-url: ${{ inputs.api-url }}
+          repository: ${{ inputs.repository }}
+          sha: ${{ inputs.sha }}
+          environment: ${{ inputs.environment }}
+          idempotency-key: smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-error: 'true'
+
+      - id: second-service
+        name: another service shipping the same commit is a separate deploy
+        uses: ./
+        with:
+          api-key: ${{ secrets.STRUCT_DEPLOY_KEY }}
+          api-url: ${{ inputs.api-url }}
+          repository: ${{ inputs.repository }}
+          sha: ${{ inputs.sha }}
+          environment: ${{ inputs.environment }}
+          idempotency-key: smoke-${{ github.run_id }}-${{ github.run_attempt }}-service-b
+          fail-on-error: 'true'
+
+      - id: failed-deploy
+        name: a failed deploy is recorded as failure
+        uses: ./
+        with:
+          api-key: ${{ secrets.STRUCT_DEPLOY_KEY }}
+          api-url: ${{ inputs.api-url }}
+          repository: ${{ inputs.repository }}
+          sha: ${{ inputs.sha }}
+          environment: ${{ inputs.environment }}
+          status: failure
+          idempotency-key: smoke-${{ github.run_id }}-${{ github.run_attempt }}-failed
+          fail-on-error: 'true'
+
+      - id: bad-key
+        name: a wrong key never fails the job
+        uses: ./
+        with:
+          api-key: sk-not-a-real-key
+          api-url: ${{ inputs.api-url }}
+          repository: ${{ inputs.repository }}
+          sha: ${{ inputs.sha }}
+          environment: ${{ inputs.environment }}
+
+      - name: check results
+        run: |
+          set -x
+          test "${{ steps.first.outputs.result }}" = recorded
+          test -n "${{ steps.first.outputs.deployment-id }}"
+          test "${{ steps.retry.outputs.deployment-id }}" = "${{ steps.first.outputs.deployment-id }}"
+          test "${{ steps.second-service.outputs.result }}" = recorded
+          test "${{ steps.second-service.outputs.deployment-id }}" != "${{ steps.first.outputs.deployment-id }}"
+          test "${{ steps.failed-deploy.outputs.result }}" = recorded
+          test "${{ steps.bad-key.outputs.result }}" = failed
