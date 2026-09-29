@@ -130,7 +130,7 @@ The step's annotation says what went wrong:
 
 ## Requirements
 
-The runner needs `bash` and `curl`, and nothing else. There is no `jq`, Python or Node dependency, so the action runs in minimal self-hosted runner containers. Linux and macOS runners are tested.
+The runner needs `bash`, `curl`, and standard Unix tools such as `grep`, `sed`, `tr` and `mktemp`, which every Linux and macOS runner has. There is no `jq`, Python or Node dependency, so the action also runs in minimal self-hosted runner containers. Linux and macOS runners are tested.
 
 ## Without this action
 
